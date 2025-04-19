@@ -2,9 +2,12 @@
   "name": "facebook-marketplace-monitor",
   "version": "1.0.0",
   "description": "Monitor Facebook Marketplace for new items and send email notifications.",
-  "main": "script.js",
+  "main": "src/marketplaceMonitor.js",
   "scripts": {
-    "start": "node marketplace_monitor.js"
+    "start": "node src/marketplaceMonitor.js",
+    "lint": "echo 'Add ESLint or similar here'",
+    "format": "echo 'Add Prettier or similar here'",
+    "test": "echo 'Add tests here'"
   },
   "dependencies": {
     "dotenv": "^16.0.0",

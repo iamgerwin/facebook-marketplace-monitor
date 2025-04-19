@@ -74,7 +74,6 @@ async function checkMarketplace() {
       const entry = await extractListingData(item);
       newItemsArray.push(entry);
     }
-    console.log('Writing to NEW_ITEMS_FILE:', JSON.stringify(newItemsArray, null, 2));
     writeJson(NEW_ITEMS_FILE, newItemsArray);
     // Compare
     const prevLinks = new Set(seenItems.map(item => item.link));

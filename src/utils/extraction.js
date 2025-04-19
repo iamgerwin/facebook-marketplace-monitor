@@ -3,34 +3,31 @@
 async function extractListingData(item) {
   const link = await item.evaluate(a => a.href);
 
-  // Extract title with improved fallback and debug logging
+  // Extract title with multiple fallback strategies
   let title = await item.$eval('[data-testid="marketplace_listing_title"]', el => el.innerText).catch(async () => {
-    // fallback: aria-label (if used for title)
-    const aria = await item.getAttribute('aria-label').catch(() => null);
-    if (aria) return aria;
-    // fallback: find a span that doesn't look like a price
+    // Fallback 1: Try link text if it looks like a product
+    const linkText = await item.$eval('a[href*="marketplace/item"]', el => el.innerText.trim()).catch(() => '');
+    if (linkText && !/^PHP\s?\d|^\d/i.test(linkText)) {
+      return linkText;
+    }
+    
+    // Fallback 2: Find first span with product info
     const spans = await item.$$('span');
-    let allSpanTexts = [];
-    for (let s of spans) {
-      let text = await s.evaluate(el => el.innerText).catch(() => '');
-      allSpanTexts.push(text);
+    for (const span of spans) {
+      const text = await span.evaluate(el => el.innerText.trim()).catch(() => '');
+      if (text && !/^PHP\s?\d|^\d/i.test(text)) {
+        return text;
+      }
     }
-    // Skip spans that look like prices (e.g., start with 'PHP' or are just numbers)
-    let likelyTitle = allSpanTexts.find(t => t && !/^PHP\s?\d|^\d|,|\./i.test(t.trim()));
-    if (!likelyTitle && allSpanTexts.length > 0) {
-      // fallback: use the first non-empty span
-      likelyTitle = allSpanTexts.find(t => t.trim() !== '');
-    }
-    // Debug log all span texts
-    console.log('[extractListingData] Fallback: All span texts:', allSpanTexts);
-    return likelyTitle || null;
+    
+    return linkText || ''; // Final fallback to link text if nothing else
   });
 
   // Extract price with debug logging
   let price = await item.$eval('[data-testid="listing_price"]', el => el.innerText).catch(async () => {
     const spans = await item.$$('span');
     let text = spans[1] ? await spans[1].evaluate(el => el.innerText) : null;
-    console.log('[extractListingData] Fallback: Price span:', text);
+    // console.log('[extractListingData] Fallback: Price span:', text);
     return text;
   });
 
@@ -45,16 +42,18 @@ async function extractListingData(item) {
       
       const cleanText = text.trim();
       
-      // Skip empty or price-like text
-      if (!cleanText || /^PHP\s?\d|^\d/i.test(cleanText)) continue;
+      // Skip empty, price-like, or title-like text
+      if (!cleanText || 
+          /^PHP\s?\d|^\d/i.test(cleanText) ||
+          /MacBook|Macbook|Air|Pro|M\d|inch|RAM|SSD|GB|TB/i.test(cleanText)) continue;
       
       // If text contains comma (city, region pattern), use it immediately
       if (/,/.test(cleanText)) {
         return cleanText;
       }
       
-      // Otherwise store as potential fallback if not title
-      if (cleanText !== title) {
+      // Only store as fallback if it looks like a location (contains city/region keywords)
+      if (/Manila|Quezon|Makati|Taguig|Pasig|NCR|PH-\d+/i.test(cleanText)) {
         lastValidSpan = cleanText;
       }
     }
@@ -97,7 +96,7 @@ async function extractListingData(item) {
   }
 
   // Debug log extracted values
-  console.log('[extractListingData] Extracted:', { link, title, price, location });
+  // console.log('[extractListingData] Extracted:', { link, title, price, location });
   return { link, title, price, location };
 }
 

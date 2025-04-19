@@ -4,7 +4,7 @@
   "description": "Monitor Facebook Marketplace for new items and send email notifications.",
   "main": "script.js",
   "scripts": {
-    "start": "node script.js"
+    "start": "node marketplace_monitor.js"
   },
   "dependencies": {
     "dotenv": "^16.0.0",

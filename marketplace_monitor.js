@@ -8,6 +8,7 @@ const SEARCH_QUERY = 'macbook'; // Change this to your item
 const CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 const MARKETPLACE_URL = `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(SEARCH_QUERY)}&sortBy=creation_time_descend`;
 const SEEN_ITEMS_FILE = 'seen_items.json';
+const NEW_ITEMS_FILE = 'new_items.json';
 const USER_DATA_DIR = path.join(__dirname, 'user_data_dir'); // Directory to store browser data
 const LOCK_FILE = path.join(USER_DATA_DIR, 'SingletonLock');
 
@@ -63,15 +64,36 @@ function cleanupBrowserProfile() {
 
 // Util to load and save seen items
 function loadSeenItems() {
-  if (!fs.existsSync(SEEN_ITEMS_FILE)) return new Set();
-  return new Set(JSON.parse(fs.readFileSync(SEEN_ITEMS_FILE, 'utf-8')));
+  if (!fs.existsSync(SEEN_ITEMS_FILE)) {
+    fs.writeFileSync(SEEN_ITEMS_FILE, '[]', 'utf-8');
+    return [];
+  }
+  return JSON.parse(fs.readFileSync(SEEN_ITEMS_FILE, 'utf-8'));
 }
-function saveSeenItems(seenSet) {
-  fs.writeFileSync(SEEN_ITEMS_FILE, JSON.stringify(Array.from(seenSet)), 'utf-8');
+function loadNewItems() {
+  if (!fs.existsSync(NEW_ITEMS_FILE)) {
+    fs.writeFileSync(NEW_ITEMS_FILE, '[]', 'utf-8');
+    return [];
+  }
+  return JSON.parse(fs.readFileSync(NEW_ITEMS_FILE, 'utf-8'));
+}
+function saveSeenItems(seenArray) {
+  fs.writeFileSync(SEEN_ITEMS_FILE, JSON.stringify(seenArray, null, 2), 'utf-8');
+}
+function saveNewItems(newArray) {
+  fs.writeFileSync(NEW_ITEMS_FILE, JSON.stringify(newArray, null, 2), 'utf-8');
+}
+function clearNewItems() {
+  fs.writeFileSync(NEW_ITEMS_FILE, '[]', 'utf-8');
 }
 
 async function checkMarketplace() {
-  const seenItems = loadSeenItems();
+  let seenItems = loadSeenItems(); // Previous run
+  let seenLinks = new Set(seenItems.map(item => item.link)); // For fast lookup
+  let newItemsArray = []; // Will store current run
+
+  // For accurate comparison, load previous run from seen_items.json, fill new_items.json, then compare
+
   let browser;
   
   // Create user_data_dir if it doesn't exist
@@ -226,15 +248,42 @@ async function checkMarketplace() {
         }
       }
     }
-    let newItems = [];
     for (const item of items) {
-      const link = await item.$eval('a', a => a.href).catch(() => null);
-      const title = await item.$eval('span', el => el.innerText).catch(() => null);
-      if (link && !seenItems.has(link)) {
-        newItems.push({ link, title });
-        seenItems.add(link);
-      }
+      // The item is an <a> element itself
+      const link = await item.evaluate(a => a.href);
+      // Try to extract title
+      let title = await item.$eval('[data-testid="marketplace_listing_title"]', el => el.innerText).catch(async () => {
+        // Fallback: aria-label
+        const aria = await item.getAttribute('aria-label').catch(() => null);
+        if (aria) return aria;
+        // Fallback: first span
+        return await item.$eval('span', el => el.innerText).catch(() => null);
+      });
+      // Try to extract price
+      let price = await item.$eval('[data-testid="listing_price"]', el => el.innerText).catch(async () => {
+        // Fallback: second span
+        const spans = await item.$$('span');
+        return spans[1] ? await spans[1].evaluate(el => el.innerText) : null;
+      });
+      // Try to extract location
+      let location = await item.$eval('[data-testid="reverse_geocode"]', el => el.innerText).catch(async () => {
+        // Fallback: third span
+        const spans = await item.$$('span');
+        return spans[2] ? await spans[2].evaluate(el => el.innerText) : null;
+      });
+      // Log for debugging
+      console.log({ link, title, price, location });
+      const entry = { link, title, price, location };
+      newItemsArray.push(entry);
     }
+    // Save all current run items to new_items.json
+    saveNewItems(newItemsArray);
+
+    // Accurate comparison: compare new_items.json to seen_items.json
+    const prevSeen = loadSeenItems();
+    const prevLinks = new Set(prevSeen.map(item => item.link));
+    let newItems = newItemsArray.filter(item => item.link && !prevLinks.has(item.link));
+
     if (newItems.length > 0) {
       // Make a prominent terminal notification with colors and sound
       // The \x07 character triggers the terminal bell sound
@@ -283,7 +332,14 @@ async function checkMarketplace() {
     // Clean shutdown of the browser
     if (browser) {
       try {
-        console.log('Closing browser...');
+        // After comparison, update seen_items.json to match new_items.json and clear new_items.json
+        const newItemsData = loadNewItems();
+        saveSeenItems(newItemsData);
+        clearNewItems();
+        const now = new Date();
+        const next = new Date(now.getTime() + CHECK_INTERVAL_MS);
+        const fmt = d => d.toLocaleString('en-US', { hour12: false });
+        console.log(`done checking marketplace ${fmt(now)} , will run next ${fmt(next)}`);
         await browser.close();
       } catch (err) {
         console.warn('Error closing browser:', err.message);
